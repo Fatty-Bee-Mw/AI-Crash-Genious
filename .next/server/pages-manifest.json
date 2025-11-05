@@ -1,6 +1,1 @@
-{
-  "/_app": "pages/_app.js",
-  "/_error": "pages/_error.js",
-  "/_document": "pages/_document.js",
-  "/": "pages/index.js"
-}
+{"/_app":"pages/_app.js","/_error":"pages/_error.js","/_document":"pages/_document.js","/api/captcha":"pages/api/captcha.js","/api/codes":"pages/api/codes.js","/api/codes/verify":"pages/api/codes/verify.js","/admin":"pages/admin.html","/api/recipients/[id]":"pages/api/recipients/[id].js","/api/requests/approve":"pages/api/requests/approve.js","/api/recipients":"pages/api/recipients.js","/api/requests":"pages/api/requests.js","/api/requests/notes":"pages/api/requests/notes.js","/api/store/export":"pages/api/store/export.js","/":"pages/index.html","/strategy":"pages/strategy.html","/api/store/import":"pages/api/store/import.js","/404":"pages/404.html"}
