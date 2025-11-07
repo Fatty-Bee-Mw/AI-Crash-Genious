@@ -22,14 +22,22 @@ export function middleware(req) {
   // Build CSP using nonce (prod-safe). Allow dev eval/inline only in development.
   const dev = process.env.NODE_ENV !== 'production';
   const scriptSrc = dev ? "'self' 'unsafe-inline' 'unsafe-eval'" : `'self' 'nonce-${nonce}'`;
-  const styleSrc = dev ? "'self' 'unsafe-inline'" : "'self' 'unsafe-inline'"; // Tailwind requires inline styles
+  const styleSrc = "'self' 'unsafe-inline'"; // Tailwind requires inline styles
+  const connectSrc = dev
+    ? "'self' ws: wss: https://crash.tgaproxy.online wss://crash.tgaproxy.online"
+    : "'self' https://crash.tgaproxy.online wss://crash.tgaproxy.online";
+  const frameSrc = dev
+    ? "'self' https: data:"
+    : "'self'"; // tighten in prod; consider allowing partner domain explicitly
+
   const csp = [
     "default-src 'self'",
     `script-src ${scriptSrc}`,
     `style-src ${styleSrc}`,
+    `connect-src ${connectSrc}`,
+    `frame-src ${frameSrc}`,
     "img-src 'self' data:",
     "font-src 'self' data:",
-    "connect-src 'self' https://crash.tgaproxy.online wss://crash.tgaproxy.online",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
