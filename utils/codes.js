@@ -25,3 +25,46 @@ export function verifyClientAccess({ code, deviceId }) {
     return { ok:false, reason:"Invalid record" };
   }
 }
+
+export function checkCodeExpiration() {
+  try {
+    const activeCode = localStorage.getItem('active_code');
+    if (!activeCode) return { expired: true, reason: "No active code" };
+    
+    const deviceId = localStorage.getItem('device_id') || getOrCreateDeviceId();
+    const result = verifyClientAccess({ code: activeCode, deviceId });
+    
+    return { 
+      expired: !result.ok, 
+      reason: result.reason || "Valid",
+      expiresAt: getCodeExpiration(activeCode)
+    };
+  } catch {
+    return { expired: true, reason: "Validation error" };
+  }
+}
+
+export function getCodeExpiration(code) {
+  try {
+    const raw = localStorage.getItem(`code_${code}`);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data.expiresAt || null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAccessData() {
+  try {
+    const activeCode = localStorage.getItem('active_code');
+    if (activeCode) {
+      localStorage.removeItem(`code_${activeCode}`);
+    }
+    localStorage.removeItem('active_code');
+    localStorage.removeItem('admin_session');
+    localStorage.removeItem('admin_code_plain');
+  } catch {
+    // Ignore errors
+  }
+}

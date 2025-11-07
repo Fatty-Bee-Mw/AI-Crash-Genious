@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
 import RequestAccessModal from "./RequestAccessModal";
 import { getOrCreateDeviceId } from "../utils/deviceLock";
+import { useAccessValidation, useAutoLogout } from "../utils/useAccessValidation";
+import { clearAccessData } from "../utils/codes";
 
 export default function AuthGate({ children, brand }) {
+  const router = useRouter();
   const deviceId = useMemo(()=> getOrCreateDeviceId(), []);
   const [openPay, setOpenPay] = useState(false);
   const [code, setCode] = useState("");
@@ -12,10 +16,37 @@ export default function AuthGate({ children, brand }) {
   const [openInfo, setOpenInfo] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [openNeedCode, setOpenNeedCode] = useState(false);
+  const [expirationNotice, setExpirationNotice] = useState("");
+  
+
+  // Handle access code expiration when user clicks Continue with expired code
+  const handleAccessExpired = useCallback((reason) => {
+    setExpirationNotice(`Access ${reason}.`);
+    
+    // Clear access data
+    clearAccessData();
+  }, [router]);
+
+  // Use access validation hook for periodic checks (disabled automatic expiration)
+  const { isValid, expiration, checking } = useAccessValidation({
+    onExpire: () => {
+      // Do nothing - let the user continue using the app until they try to verify again
+      // This prevents the automatic "Access Expired" popup
+    },
+    checkInterval: 30000 // Check every 30 seconds
+  });
+
+  // Auto-logout when code expires (disabled)
+  // useAutoLogout({
+  //   onLogout: handleAccessExpired,
+  //   expirationTime: expiration
+  // });
 
   useEffect(()=>{
     try {
       if (typeof window !== 'undefined') {
+        
+        
         const adminSess = localStorage.getItem('admin_session');
         if (adminSess === '1') { setStatus('ok'); return; }
         const admin = localStorage.getItem('admin_code_plain');
@@ -27,12 +58,22 @@ export default function AuthGate({ children, brand }) {
     setStatus('need');
   }, [deviceId]);
 
+  
+
   async function handleVerify() {
     if (!code) { setOpenNeedCode(true); return; }
     try {
       const resp = await fetch('/api/codes/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code, deviceId }) });
       const data = await resp.json();
-      if (!resp.ok) { setFeedbackMsg(data.reason || data.error || 'Invalid code'); return; }
+      if (!resp.ok) { 
+        // Check if the error is due to expiration
+        if (data.reason && data.reason.toLowerCase().includes('expired')) {
+          handleAccessExpired('Expired');
+        } else {
+          setFeedbackMsg(data.reason || data.error || 'Invalid code'); 
+        }
+        return; 
+      }
       localStorage.setItem("active_code", code);
       setStatus("ok");
     } catch {
@@ -53,6 +94,34 @@ export default function AuthGate({ children, brand }) {
     } catch (e) {
       setFeedbackMsg("Failed to submit request");
     }
+  }
+
+  
+
+  
+
+  // Show expiration notice only when triggered by Continue button with expired code
+  if (expirationNotice) {
+    return (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90">
+        <div className="w-full max-w-sm rounded-2xl p-6 border border-red-400/30 glass-card-strong shadow-[0_0_40px_rgba(239,68,68,0.15)]">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-red-500/15 border border-red-400/30 flex items-center justify-center text-red-300">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 9v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                <circle cx="12" cy="15" r="1" fill="currentColor"/>
+                <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-red-300">Access Expired</h3>
+          </div>
+          <p className="text-sm text-slate-300/90">{expirationNotice}</p>
+          <div className="mt-4 flex justify-end">
+            <button onClick={() => { setExpirationNotice(''); setCode(''); }} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15">Login</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (status !== "ok") {
@@ -81,6 +150,7 @@ export default function AuthGate({ children, brand }) {
             <button onClick={handleVerify} className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 font-semibold">Continue</button>
             <button onClick={()=> setOpenPay(true)} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15">Pay MK 1,500</button>
             <button onClick={()=> setOpenAdmin(true)} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15">Admin Login</button>
+            
             <button onClick={async()=>{
               try {
                 if (!code) { setOpenNeedCode(true); return; }
@@ -94,6 +164,10 @@ export default function AuthGate({ children, brand }) {
               } catch { setFeedbackMsg('Failed to open dashboard'); }
             }} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15">Open Dashboard</button>
           </div>
+
+          
+
+          
 
           <div className="mt-4 text-xs text-slate-400/90">Admin? Use universal code.</div>
         </div>
@@ -180,6 +254,8 @@ export default function AuthGate({ children, brand }) {
             </div>
           </div>
         )}
+
+        
       </div>
     );
   }

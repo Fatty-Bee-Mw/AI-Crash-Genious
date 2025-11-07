@@ -1,8 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/router";
 import { motion, AnimatePresence } from "framer-motion";
 import Ticker from "./Ticker";
+import { useAccessValidation } from "../utils/useAccessValidation";
+import { clearAccessData } from "../utils/codes";
+import { getOrCreateDeviceId } from "../utils/deviceLock";
+import DraggablePrediction from './DraggablePrediction';
+import InAppBrowser from './InAppBrowser';
 
 export default function Dashboard() {
+  const router = useRouter();
+  const AFFILIATE_URL = process.env.NEXT_PUBLIC_AFFILIATE_URL || "https://media.premierbetpartners.com/redirect.aspx?pid=127519&bid=5039";
   const wsRef = useRef(null);
   const MAX_HISTORY = 50;
   const [rounds, setRounds] = useState([]);
@@ -25,6 +33,96 @@ export default function Dashboard() {
   const [stakeStrategy, setStakeStrategy] = useState('fixed'); // fixed | kelly | recovery
   const nextStakeBoostRef = useRef(1); // for recovery strategy
   const [infoOpen, setInfoOpen] = useState(false);
+  const [accessExpired, setAccessExpired] = useState(false);
+  const [openAdminLogin, setOpenAdminLogin] = useState(false);
+  const [adminCode, setAdminCode] = useState("");
+  const [adminError, setAdminError] = useState("");
+  const [isPlayMode, setIsPlayMode] = useState(false);
+  const [openRegisterPlay, setOpenRegisterPlay] = useState(false);
+
+  const togglePlayMode = () => {
+    if (!isPlayMode && !isAffiliateRegistered()) {
+      setOpenRegisterPlay(true);
+    } else {
+      setIsPlayMode(!isPlayMode);
+    }
+  };
+
+  const isAffiliateRegistered = () => {
+    try { return localStorage.getItem('affiliate_registered') === 'yes'; } catch { return false; }
+  };
+
+  const markAffiliateRegistered = () => {
+    try { localStorage.setItem('affiliate_registered', 'yes'); } catch {}
+  };
+
+  const onPlayClick = () => {
+    if (!isAffiliateRegistered()) {
+      setOpenRegisterPlay(true);
+      return;
+    }
+    setIsPlayMode(true);
+  };
+
+  // Demo mode removed: no countdown or watermark
+
+  // Handle access expiration
+  const handleAccessExpired = useCallback((reason) => {
+    setAccessExpired(true);
+    clearAccessData();
+    
+    // Redirect to home page after a short delay
+    setTimeout(() => {
+      router.push('/');
+    }, 2000);
+  }, [router]);
+
+  // Use access validation hook for periodic checks
+  const { isValid, expiration } = useAccessValidation({
+    onExpire: handleAccessExpired,
+    checkInterval: 60000 // Check every minute in dashboard
+  });
+
+  if (isPlayMode) {
+    return <InAppBrowser initialUrl={AFFILIATE_URL} onExit={() => setIsPlayMode(false)} />;
+  }
+
+  // Navigation functions
+  const handleGoHome = () => {
+    router.push('/');
+  };
+
+  const handleAdminLogin = async () => {
+    if (!adminCode) {
+      setAdminError('Please enter admin code');
+      return;
+    }
+
+    try {
+      const deviceId = getOrCreateDeviceId();
+      const resp = await fetch('/api/codes/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: adminCode, deviceId })
+      });
+      
+      const data = await resp.json();
+      
+      if (resp.ok && data.ok) {
+        // Store admin session
+        localStorage.setItem('admin_session', '1');
+        localStorage.setItem('admin_code_plain', adminCode);
+        setOpenAdminLogin(false);
+        setAdminError('');
+        // Redirect to admin panel
+        router.push('/admin');
+      } else {
+        setAdminError(data.reason || 'Invalid admin code');
+      }
+    } catch (error) {
+      setAdminError('Admin verification failed');
+    }
+  };
 
   // Advanced predictor params (tunable)
   const [advOpen, setAdvOpen] = useState(false);
@@ -483,8 +581,41 @@ export default function Dashboard() {
   } catch {}
   const lowConfNow = !!(autoSkip && (confRef.current||0) < (autoSkipThr||0));
 
+  // Show access expired overlay
+  if (accessExpired) {
+    return (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90">
+        <div className="w-full max-w-sm rounded-2xl p-6 border border-red-400/30 glass-card-strong shadow-[0_0_40px_rgba(239,68,68,0.15)]">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-red-500/15 border border-red-400/30 flex items-center justify-center text-red-300">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 9v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                <circle cx="12" cy="15" r="1" fill="currentColor"/>
+                <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+            </div>
+            <h3 className="text-lg font-semibold text-red-300">Access Expired</h3>
+          </div>
+          <p className="text-sm text-slate-300/90">Your access code has expired. Redirecting to login page...</p>
+          <div className="mt-4 flex justify-end">
+            <div className="text-xs text-slate-400">Redirecting...</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col gap-5">
+    <>
+      <AnimatePresence>
+        {!isPlayMode && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="flex flex-col gap-5"
+          >
       <div className="flex items-center justify-between">
         <div className="inline-flex gap-3 overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-600/50 scrollbar-track-transparent py-1">
           <div className="px-3 py-1 rounded-lg bg-white/10 border border-white/20 text-slate-100 text-xs">
@@ -521,6 +652,20 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="inline-flex gap-2 items-center overflow-x-auto whitespace-nowrap scrollbar-thin scrollbar-thumb-slate-600/50 scrollbar-track-transparent py-1">
+          <button
+            onClick={handleGoHome}
+            className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200 text-xs"
+            title="Go to Home/Auth Page"
+          >
+            🏠 Home
+          </button>
+          <button
+            onClick={() => setOpenAdminLogin(true)}
+            className="px-3 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 text-xs"
+            title="Admin Panel Login"
+          >
+            🔐 Admin Panel
+          </button>
           <a
             href="https://media.premierbetpartners.com/redirect.aspx?pid=127519&bid=5039"
             target="_blank"
@@ -797,6 +942,95 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-    </div>
+      
+      {/* Admin Login Modal */}
+      {openAdminLogin && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/80" onClick={()=> setOpenAdminLogin(false)} />
+          <div className="relative w-full max-w-md rounded-2xl p-6 border border-white/15 bg-[#0b0f14] shadow-[0_0_40px_rgba(255,255,255,0.12)] text-slate-100">
+            <h3 className="text-lg font-semibold mb-4">Admin Panel Access</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-300 mb-2">Admin Universal Access Code</label>
+                <input
+                  type="password"
+                  value={adminCode}
+                  onChange={(e) => setAdminCode(e.target.value)}
+                  className="w-full bg-white/5 border border-white/20 rounded-lg px-3 py-2 text-white outline-none focus:border-cyan-400/80 focus:ring-2 focus:ring-cyan-500/30"
+                  placeholder="Enter admin access code"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAdminLogin()}
+                />
+              </div>
+              {adminError && (
+                <div className="text-sm text-rose-300 bg-rose-500/10 border border-rose-400/20 rounded-lg p-3">
+                  {adminError}
+                </div>
+              )}
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setOpenAdminLogin(false)}
+                  className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAdminLogin}
+                  disabled={!adminCode.trim()}
+                  className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-600 disabled:cursor-not-allowed text-white text-sm"
+                >
+                  Access Admin Panel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isPlayMode && (
+        <DraggablePrediction 
+          prediction={finalRef.current.toFixed(2)}
+        />
+      )}
+
+      {/* Play mode controls: Back and Play */}
+      {isPlayMode && (
+        <div className="fixed bottom-4 left-4 z-[200] flex gap-2">
+          <button onClick={togglePlayMode} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-slate-200">Back</button>
+          <button onClick={onPlayClick} className="px-4 py-2 rounded-lg bg-blue-600 text-white shadow-lg hover:bg-blue-700">Play</button>
+        </div>
+      )}
+
+      {/* Demo watermark removed */}
+
+      {/* Register & Play modal */}
+      {openRegisterPlay && (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70" onClick={()=> setOpenRegisterPlay(false)} />
+          <div className="relative w-full max-w-md rounded-2xl p-6 border border-emerald-400/30 bg-[#0d1117] shadow-[0_0_40px_rgba(16,185,129,0.15)] text-slate-100">
+            <h3 className="text-xl font-bold">Register to Play</h3>
+            <p className="text-sm text-slate-300/90 mt-2">To play using this device, first register an account via our partner link below. Once registered, hit “I’ve Registered” to proceed.</p>
+            <div className="mt-4 flex gap-3">
+              <a href={AFFILIATE_URL} target="_blank" rel="noopener noreferrer nofollow" className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15">Register Now</a>
+              <button onClick={()=> { markAffiliateRegistered(); setOpenRegisterPlay(false); router.push('/play'); }} className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold">I've Registered</button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button onClick={()=> setOpenRegisterPlay(false)} className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/15">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="fixed bottom-4 right-4 z-[200]">
+        <button
+          onClick={togglePlayMode}
+          className="px-4 py-2 rounded-lg bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
+        >
+          {isPlayMode ? "Show Dashboard" : "Use this Device to Play"}
+        </button>
+      </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
